@@ -56,7 +56,10 @@ var budgetController = (function IIFE() {
         },
         budget: 0,
         percentage: -1,
-        limit: -1
+        limit: {
+            type: 'none',
+            value: -1
+        }
     };
 
     return {
@@ -174,8 +177,13 @@ var budgetController = (function IIFE() {
                 budget: data.budget,
                 totalIncome: data.totals.income,
                 totalExpense: data.totals.expense,
-                percentage: data.percentage
+                percentage: data.percentage,
+                limit: data.limit
             }
+        },
+
+        getLimit: function () {
+            return data.limit;
         },
 
         testing: function () {
@@ -317,12 +325,10 @@ var UIController = (function IIFE() {
 
             switch (limitType) {
                 case 'percentage':
-                    // console.log('%');
                     document.querySelector(DOMstrings.limitInputSymbol).textContent = '%';
                     break;
 
                 case 'amount':
-                    // console.log('€');
                     document.querySelector(DOMstrings.limitInputSymbol).textContent = '€';
                     break;
             };
@@ -362,6 +368,18 @@ var UIController = (function IIFE() {
             field = document.querySelector(DOMstrings.limitInputValue);
             field.value = '';
             field.focus();
+        },
+
+        toggleInputValueField: function () {
+            var field;
+
+            field = document.querySelector(DOMstrings.inputValue);
+            if (field.hasAttribute('disabled')) {
+                field.removeAttribute('disabled');
+            } else {
+                field.setAttribute('disabled', ''); // disabled == true
+            };
+
         },
 
         displayBudget: function (object) {
@@ -438,6 +456,9 @@ var controller = (function (budgetCtrl, UICtrl) {
     // Retrieve the DOMstrings from the UIController = Refactoring
     var DOM = UICtrl.getDOMstrings();
 
+    // Store boolean for event listener based on limit
+    var hasExceededLimit;
+
     // Function to set all the event listeners
     // so the structure is clean with every code in functions
     var setupEventListeners = function () {
@@ -460,10 +481,28 @@ var controller = (function (budgetCtrl, UICtrl) {
         });
 
         // Event listener for the remove btn click
-        document.querySelector(DOM.container).addEventListener('click', ctrlDeleteItem);
+        document.querySelector(DOM.container).addEventListener('click', function () {
+            ctrlDeleteItem(event);
+            hasExceededLimit = !hasExceededLimit;
+            if (document.querySelector(DOM.inputType).value === 'expense') {
+                UICtrl.toggleInputValueField();
+            };
+        });
 
         // Event listener for the type drop down menu
         document.querySelector(DOM.inputType).addEventListener('change', UICtrl.changedType);
+        //// Enable input value field
+        document.querySelector(DOM.inputType).addEventListener('change', function () {
+            if (document.querySelector(DOM.inputType).value === 'income' && document.querySelector(DOM.inputValue).hasAttribute('disabled')) {
+                UICtrl.toggleInputValueField();
+            };
+            if (document.querySelector(DOM.inputType).value === 'expense' && hasExceededLimit) {
+                alert('To type new expense, remove last expense, add new income or change the limit.');
+                UICtrl.toggleInputValueField();
+            };
+
+        });
+
 
         // Event listener for the set limit btn
         document.querySelector(DOM.limitInputBtn).addEventListener('click', ctrlAddLimit);
@@ -507,12 +546,60 @@ var controller = (function (budgetCtrl, UICtrl) {
         UICtrl.addLimit(limit.type, limit.value);
     };
 
+    var checkLimit = function (lastAddedExpense) {
+        var limit, budget, message, verb, limitValue, symbol;
+        verb = 'reached';
+        message = 'Warning ! You have ';
+
+        // 1. Retrieve limit from data
+        limit = budgetCtrl.getLimit();
+
+        // 1a. Process the limit type
+        switch (limit.type) {
+            case 'amount':
+
+                symbol = ' €';
+                fullLimitValue = limit.value + symbol;
+                // 2. Retrieve last added item for amount limit set
+                if (lastAddedExpense === limit.value) {
+                    showMessage(verb, fullLimitValue);
+                    return lastAddedExpense === limit.value;
+                } else if (lastAddedExpense > limit.value) {
+                    showMessage('exceeded', fullLimitValue);
+                    return lastAddedExpense > limit.value;
+                };
+                break;
+
+            case 'percentage':
+
+                symbol = '%';
+                fullLimitValue = limit.value + symbol;
+                // 3. Retrieve budget for percentage limit set
+                budget = budgetCtrl.getBudget();
+                if (budget.percentage === limit.value) {
+                    showMessage(verb, fullLimitValue);
+                    return budget.percentage === limit.value;
+                } else if (budget.percentage > limit.value) {
+                    showMessage('exceeded', fullLimitValue);
+                    return budget.percentage > limit.value;
+                };
+                break;
+        };
+
+        function showMessage(verb, fullLimitValue) {
+            message += verb + ' your limit : ' + fullLimitValue + 'To type new expenses, you can : - remove last one, - input new income, - change your limit';
+            // 4. Show alert window and warn user for further input
+            alert(message);
+        };
+
+        return '' === false; // false
+    };
+
     var ctrlAddItem = function () {
         var input, newItem;
 
         // 1. Get the field input data
         input = UICtrl.getInput();
-        // console.log(input);
 
         if (input.description !== '' && !isNaN(input.value) && input.value > 0) {
             // 2. Add the item to the budget controller
@@ -533,6 +620,18 @@ var controller = (function (budgetCtrl, UICtrl) {
             // 6. Calculate and update percentages
             updatePercentages();
 
+            // 7. Check the limit
+            if (input.type === 'expense') {
+                hasExceededLimit = checkLimit(newItem.value);
+                if (hasExceededLimit) {
+                    // 8. Manage expenses input field (checkLimit has returned true)
+                    // Update UI with disabled input field for exp
+                    UICtrl.toggleInputValueField();
+                };
+            };
+
+
+
         };
     };
 
@@ -541,7 +640,7 @@ var controller = (function (budgetCtrl, UICtrl) {
 
         // 1. Get limit input from DOM
         input = UICtrl.getLimitInput();
-        // console.log('in ctrlAddLimit, input =', input);
+        // console.log('in ctrlAddLimit, input = ', input);
 
         // 2. Add the limit to the budget controller
         if (!input.value.isNaN && input.value > 0) {
@@ -592,7 +691,10 @@ var controller = (function (budgetCtrl, UICtrl) {
                 totalIncome: 0,
                 totalExpense: 0,
                 percentage: -1,
-                limit: -1
+                limit: {
+                    type: 'none',
+                    value: -1
+                }
             });
             setupEventListeners();
         }
